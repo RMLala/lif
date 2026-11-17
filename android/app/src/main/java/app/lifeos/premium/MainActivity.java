@@ -15,6 +15,7 @@ import com.getcapacitor.BridgeActivity;
 
 /** Native gate: no HTML flag can dismiss this screen or disable the lock. */
 public class MainActivity extends BridgeActivity {
+    public interface AuthFailure { void accept(String message); }
     private LinearLayout shield;
     private boolean unlocked=false, prompting=false;
     public static final int AUTH = BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
@@ -41,7 +42,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onResume(){super.onResume();if(lockEnabled()&&!unlocked){showShield();getWindow().getDecorView().post(this::unlock);}}
     @Override public void onPause(){if(lockEnabled())showShield();super.onPause();}
     public void lockNow(){showShield();unlock();}
-    public void authenticate(Runnable success,java.util.function.Consumer<String> failure){
+    public void authenticate(Runnable success,AuthFailure failure){
         if(prompting){failure.accept("Une authentification est déjà en cours.");return;}
         if(BiometricManager.from(this).canAuthenticate(AUTH)!=BiometricManager.BIOMETRIC_SUCCESS){failure.accept("Configure un verrouillage d’écran dans les réglages Android.");return;}
         prompting=true;
