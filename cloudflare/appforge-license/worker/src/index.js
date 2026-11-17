@@ -177,4 +177,18 @@ async function handle(req, env) {
   }
   return json({ error: "Route inconnue." }, 404);
 }
-export default { async fetch(req, env) { try { return await handle(req, env); } catch (err) { return json({ error: "Erreur serveur. Vérifiez la configuration du service." }, 500); } } };
+function restrictCors(req, env, response) {
+  const headers = new Headers(response.headers);
+  const origin = req.headers.get("Origin") || "";
+  const allowed = (env.APP_ORIGINS || "").split(",").map(value => value.trim()).filter(Boolean);
+  headers.delete("Access-Control-Allow-Origin");
+  if (origin && allowed.includes(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    headers.set("Access-Control-Max-Age", "86400");
+    headers.set("Vary", "Origin");
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+export default { async fetch(req, env) { try { return restrictCors(req, env, await handle(req, env)); } catch (err) { return restrictCors(req, env, json({ error: "Erreur serveur. Vérifiez la configuration du service." }, 500)); } } };
