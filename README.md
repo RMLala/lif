@@ -1,6 +1,6 @@
 # LifeOS Premium 6.7.0 — icône Élan et sauvegarde locale Android
 
-L’icône de lancement choisie est **Élan — indigo lumineux**, intégrée au lanceur Android, au PWA et à la favicon. Les 50 nouvelles icônes chrétiennes des habitudes et les 50 nouvelles icônes chrétiennes des objectifs sont séparées, en plus des 100 précédentes par type. « Sans icône » reste disponible.
+L’icône de lancement choisie est **Élan — indigo lumineux**, intégrée au lanceur Android et au favicon du HTML autonome. Les 50 nouvelles icônes chrétiennes des habitudes et les 50 nouvelles icônes chrétiennes des objectifs sont séparées, en plus des 100 précédentes par type. « Sans icône » reste disponible.
 
 Sur Android 10 et versions récentes, le bouton d’export JSON enregistre automatiquement dans `Download/backup`. Sur Android 6 à 9, le système demande de choisir l’emplacement. Un navigateur web ne peut pas écrire arbitrairement dans un sous-dossier Téléchargements : il utilise son mécanisme de téléchargement. Les points de récupération intégrés à LifeOS restent conservés dans le stockage privé de l’application.
 
@@ -15,7 +15,7 @@ Version Android : 6.7.0 / code 60700. La version inclut les thèmes et le volet 
 
 ## Vérification 6.7.0
 - 34 tests automatisés réussis, dont la migration des habitudes, les trois statuts rapides, les filtres Matin/Journée/Soir et la densité compacte.
-- HTML autonome construit et assets Android/PWA synchronisés.
+- HTML autonome construit et assets Android synchronisés ; aucune PWA n’est générée.
 - Le contrôle Playwright et la compilation APK ne sont pas disponibles dans cet environnement : Chromium manque et Gradle ne peut pas télécharger sa distribution.
 
 # LifeOS Premium 6.5.0 — livraison complète
@@ -49,7 +49,7 @@ LifeOS est un espace personnel pour organiser ses objectifs, ses tâches, ses ha
 
 Ouvrir `dist/LifeOS_Premium_V6.html` dans Chrome ou Edge. Aucune installation, aucune connexion requise pour la gestion quotidienne.
 
-Pour reprendre les données : dans la V3/V4, exporter le JSON ; dans la V6, ouvrir Données & sauvegardes → Restaurer. Le fichier HTML, la PWA et l’APK peuvent avoir des stockages distincts : le JSON permet le transfert.
+Pour reprendre les données : dans la V3/V4, exporter le JSON ; dans la V6, ouvrir Données & sauvegardes → Restaurer. Le fichier HTML et l’APK peuvent avoir des stockages distincts : le JSON permet le transfert.
 
 ## Nouveautés V6.4.6
 
@@ -64,7 +64,7 @@ Pour reprendre les données : dans la V3/V4, exporter le JSON ; dans la V6, ouvr
 
 ## Fonctionnalités livrées
 
-| Fonction | HTML / PWA | Android |
+| Fonction | HTML autonome | Android |
 |---|---|---|
 | Objectifs, projets, habitudes, focus, journal, statistiques et corbeille | Oui | Oui |
 | Rubriques Données et Paramètres visibles | Oui | Oui |
@@ -178,9 +178,11 @@ Vérifications réalisées dans cet environnement : 26 tests automatisés passen
 
 À vérifier sur le téléphone après compilation : activation/désactivation biométrique, code système de secours, retour du fond, annulation du sélecteur de fichiers, connexion Google avec le bon SHA-1, sauvegarde/restauration Drive, reprise d’une autorisation expirée et envoi automatique différé. Aucun compte Google ni appareil biométrique n’était disponible dans cet environnement de développement.
 
-## PWA
+## Formats pris en charge
 
-Servir `www/` sur HTTPS ou localhost. Le manifeste et le service worker permettent une utilisation hors ligne après chargement. Une nouvelle version du cache s’active une fois les anciens onglets fermés. Pour distribuer une mise à jour, modifier le nom de cache dans `src/sw.js`, reconstruire puis redéployer. Les fonctions natives ne sont pas proposées comme actives dans la PWA.
+- HTML autonome, utilisable dans un navigateur.
+- Application Android via Capacitor.
+- Aucune PWA n’est produite ni intégrée.
 
 ## Références techniques
 
@@ -254,3 +256,8 @@ Servir `www/` sur HTTPS ou localhost. Le manifeste et le service worker permette
 - Candidate à valider sur téléphone avant remplacement de la version de référence.
 
 - Correction complémentaire : les sections Actions et Historique de la fiche objectif ne sont plus tronquées ; le message de liste vide des habitudes est rétabli.
+
+
+## Statut AppForge V3
+
+Le dépôt appelle le contrôle statique central V3 et fournit son rapport CI. Un résultat vert de ce contrôle ne vaut pas conformité complète : les fonctions Cloudflare (licences, synchronisation multi-appareils et gestion des conflits), le partage/restauration Drive natifs selon V3 et la page À propos & Support restent à vérifier ou compléter. Les validations biométriques, sauvegardes, partage de fichiers, licence, cloud et appareils réels nécessitent des essais d’intégration.
