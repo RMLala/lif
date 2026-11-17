@@ -45,12 +45,12 @@ Le workflow GitHub exécute les tests, synchronise Capacitor et construit les de
 
 ## État AppForge V3
 
-Cette branche apporte l’appel au contrôle statique central V3, les variantes Android API 23/29, le partage/restauration natifs et la suppression des fichiers PWA. Le résultat vert de l’audit statique ne signifie pas conformité complète.
+Cette branche apporte les variantes Android API 23/29, le partage/restauration natifs sans OAuth, l’interface À propos & Support, les clients Cloud/licences LifeOS et leurs Workers Cloudflare + migrations D1. Aucun fichier PWA n’est généré. Un audit statique vert ne signifie pas conformité complète.
 
 À compléter ou à valider séparément :
 
-- Cloudflare Workers + D1 pour les licences, la synchronisation multi-appareils, les conflits, quotas et révocations.
-- Page « À propos & Support » complète selon le référentiel.
+- Déployer les deux Workers Cloudflare, créer les bases D1, configurer les origines exactes et les secrets depuis les guides sous `cloudflare/`. La Bibliothèque ne contenait ni endpoint réel ni secrets.
+- Tester en ligne les parcours Cloud et licence : les fichiers et clients sont préparés, le service n’est pas déployé.
 - Essais sur appareil pour le verrouillage, le partage, la restauration, la sauvegarde locale et les autorisations.
 - Builds Release signés et vérification de la disponibilité effective des secrets d’organisation.
 
