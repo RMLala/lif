@@ -4,7 +4,7 @@ L’icône de lancement choisie est **Élan — indigo lumineux**, intégrée au
 
 Sur Android 10 et versions récentes, le bouton d’export JSON enregistre automatiquement dans `Download/backup`. Sur Android 6 à 9, le système demande de choisir l’emplacement. Un navigateur web ne peut pas écrire arbitrairement dans un sous-dossier Téléchargements : il utilise son mécanisme de téléchargement. Les points de récupération intégrés à LifeOS restent conservés dans le stockage privé de l’application.
 
-Version Android : 6.7.0 / code 60700. La version inclut les thèmes et le volet de navigation déjà validés, ainsi que les fonctionnalités précédentes.
+Version Android : 6.7.0 / code 60700. La version conserve les thèmes, le volet de navigation et les fonctionnalités précédentes déjà validées.
 
 ## Changements 6.7.0
 - Les habitudes sont classées **Matin**, **Journée** ou **Soir**. Le moment se choisit à la création/modification, apparaît sur la fiche et peut servir de filtre.
@@ -15,7 +15,7 @@ Version Android : 6.7.0 / code 60700. La version inclut les thèmes et le volet 
 
 ## Vérification 6.7.0
 - 34 tests automatisés réussis, dont la migration des habitudes, les trois statuts rapides, les filtres Matin/Journée/Soir et la densité compacte.
-- HTML autonome construit et assets Android synchronisés ; aucune PWA n’est générée.
+- HTML autonome construit et assets Android synchronisés ; aucune HTML autonome n’est générée.
 - Le contrôle Playwright et la compilation APK ne sont pas disponibles dans cet environnement : Chromium manque et Gradle ne peut pas télécharger sa distribution.
 
 # LifeOS Premium 6.5.0 — livraison complète
@@ -36,7 +36,7 @@ Le ZIP contient le projet Android/GitHub complet et le HTML autonome dans `dist/
 - Rendu du nouveau sélecteur sur téléphone et compilation APK non vérifiés ici. Les thèmes et le volet précédents ont été validés par l’utilisateur.
 - Importer le contenu du ZIP à la racine du dépôt GitHub, y compris `.github/workflows/android.yml`, puis lancer Actions. Artefact : `LifeOS-V6.5.0-Android`.
 - Version Android : `versionCode 60500`, `versionName 6.5.0`. Installer l’APK généré avec la même signature pour conserver les données. Le ZIP est un projet source, pas un APK.
-- Google Drive conserve ses fonctions de sauvegarde, restauration et synchronisation à la demande ; configuration OAuth/SHA-1 requise. Pas de fusion automatique des modifications.
+- Drive s’utilise via le menu de partage Android ; la restauration passe par le sélecteur de fichiers. Il n’y a pas de connexion OAuth ni de synchronisation Drive. Pas de fusion automatique des modifications.
 
 ---
 Documentation et historique des versions précédentes ci-dessous.
@@ -182,7 +182,7 @@ Vérifications réalisées dans cet environnement : 26 tests automatisés passen
 
 - HTML autonome, utilisable dans un navigateur.
 - Application Android via Capacitor.
-- Aucune PWA n’est produite ni intégrée.
+- Aucune HTML autonome n’est produite ni intégrée.
 
 ## Références techniques
 
