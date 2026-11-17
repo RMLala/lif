@@ -11,7 +11,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import java.nio.charset.StandardCharsets;
 
-/** Encrypted working copy for background backups. The web storage is separate. */
+/** Encrypted local working snapshot. The web storage is separate. */
 public final class BackupStore {
     private BackupStore(){}
     public static SharedPreferences prefs(Context c){return c.getSharedPreferences("lifeos_native",Context.MODE_PRIVATE);}
