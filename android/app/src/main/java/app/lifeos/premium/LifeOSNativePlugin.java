@@ -37,7 +37,7 @@ public class LifeOSNativePlugin extends Plugin {
             Intent send=new Intent(Intent.ACTION_SEND);send.setType("application/json");send.putExtra(Intent.EXTRA_STREAM,uri);
             send.setClipData(ClipData.newUri(getContext().getContentResolver(),"Sauvegarde LifeOS",uri));
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            getActivity().runOnUiThread(()->{try{startActivity(Intent.createChooser(send,"Partager la sauvegarde LifeOS"));c.resolve();}catch(Exception e){c.reject("Menu de partage indisponible : "+e.getMessage());}});
+            getActivity().runOnUiThread(()->{try{getActivity().startActivity(Intent.createChooser(send,"Partager la sauvegarde LifeOS"));c.resolve();}catch(Exception e){c.reject("Menu de partage indisponible : "+e.getMessage());}});
         }catch(Exception e){c.reject("Préparation du partage impossible : "+e.getMessage());}});
     }
     @PluginMethod public void saveBackup(PluginCall c){
