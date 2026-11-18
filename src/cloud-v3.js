@@ -1,7 +1,7 @@
 // AppForge V3 — LifeOS Cloud, licences, support and privacy status.
 const afCloudKey='lifeos.appforge.cloud.v1',afLicenseKey='lifeos.appforge.license.v1',afInstallKey='lifeos.appforge.install.v1';
-const AF_LICENSE_API='https://appforge-license-api.appforge-licences-mg.workers.dev';
-const AF_CLOUD_API='https://appforge-cloud-api.appforge-licences-mg.workers.dev';
+const AF_LICENSE_API='https://lifeos-license-api.appforge-licences-mg.workers.dev';
+const AF_CLOUD_API='https://lifeos-cloud-api.appforge-licences-mg.workers.dev';
 const afConfig=()=>{try{return JSON.parse(localStorage.getItem(afCloudKey)||'{}')}catch{return {}}};
 const afLicense=()=>{try{return JSON.parse(localStorage.getItem(afLicenseKey)||'{}')}catch{return {}}};
 function afSaveConfig(v){localStorage.setItem(afCloudKey,JSON.stringify(v))}
