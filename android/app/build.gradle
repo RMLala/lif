@@ -1,3 +1,5 @@
+import java.util.Base64
+
 apply plugin: 'com.android.application'
 
 android {
@@ -5,46 +7,78 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "app.lifeos.premium"
-        minSdkVersion rootProject.ext.minSdkVersion
+        minSdkVersion 23
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 60700
         versionName "6.7.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
-             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    flavorDimensions "compatibility"
+    productFlavors {
+        api23 {
+            dimension "compatibility"
+            minSdkVersion 23
+            versionCode 6070023
+        }
+        api29 {
+            dimension "compatibility"
+            minSdkVersion 29
+            versionCode 6070029
+        }
+    }
+
     signingConfigs {
-        release {
-            if (System.getenv('LIFEOS_KEYSTORE')) {
-                storeFile file(System.getenv('LIFEOS_KEYSTORE'))
-                storePassword System.getenv('LIFEOS_STORE_PASSWORD')
-                keyAlias System.getenv('LIFEOS_KEY_ALIAS')
-                keyPassword System.getenv('LIFEOS_KEY_PASSWORD')
+        releaseCI {
+            def encoded = System.getenv('KEYSTORE_BASE64')
+            def aliasValue = System.getenv('KEY_ALIAS')
+            def storePass = System.getenv('KEYSTORE_PASSWORD')
+            def keyPass = System.getenv('KEY_PASSWORD')
+            if (encoded?.trim() && aliasValue?.trim() && storePass?.trim() && keyPass?.trim()) {
+                def keystore = layout.buildDirectory.file('secure/lifeos-release.jks').get().asFile
+                keystore.parentFile.mkdirs()
+                keystore.bytes = Base64.getMimeDecoder().decode(encoded)
+                storeFile = keystore
+                storePassword = storePass
+                keyAlias = aliasValue
+                keyPassword = keyPass
             }
         }
     }
+
     buildTypes {
         release {
-            if (System.getenv('LIFEOS_KEYSTORE')) signingConfig signingConfigs.release
+            signingConfig signingConfigs.releaseCI
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 }
 
+tasks.register('verifyReleaseCredentials') {
+    doLast {
+        def required = ['KEYSTORE_BASE64', 'KEY_ALIAS', 'KEYSTORE_PASSWORD', 'KEY_PASSWORD']
+        def missing = required.findAll { !System.getenv(it)?.trim() }
+        if (!missing.isEmpty()) {
+            throw new GradleException("Missing release signing secrets: ${missing.join(', ')}")
+        }
+    }
+}
+tasks.matching { it.name in ['packageApi23Release', 'packageApi29Release'] }.configureEach {
+    dependsOn 'verifyReleaseCredentials'
+}
+
 repositories {
-    flatDir{
+    flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
 
 dependencies {
     implementation "androidx.biometric:biometric:1.1.0"
-    implementation "androidx.work:work-runtime:2.10.1"
-    implementation "com.google.android.gms:play-services-auth:22.0.0"
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"

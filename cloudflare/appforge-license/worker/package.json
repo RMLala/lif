@@ -1,0 +1,15 @@
+{
+  "name": "appforge-license-api",
+  "private": true,
+  "version": "1.2.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create appforge-licenses",
+    "db:migrate:local": "wrangler d1 migrations apply appforge-licenses --local",
+    "db:migrate:remote": "wrangler d1 migrations apply appforge-licenses --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
