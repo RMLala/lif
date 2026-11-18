@@ -1,3 +1,4 @@
+import { signCloudToken } from "../../../shared/cloud-token.js";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -42,16 +43,20 @@ async function startTrial(req, env) {
   const product = await env.DB.prepare("SELECT product_id FROM products WHERE product_id=? AND status='active'").bind(productId).first();
   if (!product) return json({ error: "Application inconnue ou inactive." }, 404);
   const installationHash = await digest(installationId), now = new Date();
-  let trial = await env.DB.prepare("SELECT started_at,expires_at FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
+  let trial = await env.DB.prepare("SELECT started_at,expires_at,cloud_enabled,cloud_tenant_id FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
   if (!trial) {
     const hours = Math.max(1, Math.min(168, Number(env.TRIAL_HOURS || 72)));
     const startedAt = now.toISOString(), expiresAt = new Date(now.getTime() + hours * 3600000).toISOString();
-    await env.DB.prepare("INSERT OR IGNORE INTO trials(product_id,installation_hash,started_at,expires_at) VALUES(?,?,?,?)").bind(productId, installationHash, startedAt, expiresAt).run();
-    trial = await env.DB.prepare("SELECT started_at,expires_at FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
+    await env.DB.prepare("INSERT OR IGNORE INTO trials(product_id,installation_hash,started_at,expires_at,cloud_enabled,cloud_tenant_id) VALUES(?,?,?,?,?,?)").bind(productId, installationHash, startedAt, expiresAt, env.TRIAL_CLOUD_ENABLED === "false" ? 0 : 1, crypto.randomUUID()).run();
+    trial = await env.DB.prepare("SELECT started_at,expires_at,cloud_enabled,cloud_tenant_id FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
   }
   if (!trial || Date.parse(trial.expires_at) <= now.getTime()) return json({ active: false, expired: true, error: "La période d’essai est terminée." }, 403);
-  const token = await signedToken(env, { v: 1, app: productId, kind: "trial", install: installationHash, iat: trial.started_at, exp: trial.expires_at });
-  return json({ ok: true, active: true, token, publicKey: await publicKey(env), startedAt: trial.started_at, expiresAt: trial.expires_at, offline: true });
+  if (!trial.cloud_tenant_id) {
+    await env.DB.prepare("UPDATE trials SET cloud_tenant_id=? WHERE product_id=? AND installation_hash=? AND cloud_tenant_id IS NULL").bind(crypto.randomUUID(), productId, installationHash).run();
+    trial = await env.DB.prepare("SELECT started_at,expires_at,cloud_enabled,cloud_tenant_id FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
+  }
+  const token = await signedToken(env, { v: 1, app: productId, kind: "trial", install: installationHash, iat: trial.started_at, exp: trial.expires_at, cloud: trial.cloud_enabled === 1 });
+  return json({ ok: true, active: true, token, publicKey: await publicKey(env), startedAt: trial.started_at, expiresAt: trial.expires_at, cloudEnabled: trial.cloud_enabled === 1, offline: true });
 }
 async function activate(req, env) {
   const data = await body(req);
@@ -61,18 +66,18 @@ async function activate(req, env) {
   if (!validId(productId) || code.length < 12 || code.length > 80 || installationId.length < 16 || installationId.length > 120) return json({ error: "Informations d’activation invalides." }, 400);
   const beforeUsage = await dailyUsage(env);
   if (beforeUsage.totalRequests >= beforeUsage.softLimit) return json({ error: "Limite quotidienne d’activations atteinte. Réessayez demain.", usage: beforeUsage }, 429);
-  const usage = await dailyUsage(env, true, "activation");
+  await dailyUsage(env, true, "activation");
   const codeHash = await digest(`${env.CODE_HASH_PEPPER || ""}:${code}`);
   const ip = req.headers.get("CF-Connecting-IP") || "unknown";
-  const license = await env.DB.prepare("SELECT id,product_id,status,paid_confirmed,max_devices,expires_at FROM licenses WHERE product_id=? AND code_hash=?").bind(productId, codeHash).first();
-  if (!license || license.status !== "active" || !license.paid_confirmed) {
+  const license = await env.DB.prepare("SELECT id,product_id,status,paid_confirmed,max_devices,expires_at,suspended_at,cloud_enabled FROM licenses WHERE product_id=? AND code_hash=?").bind(productId, codeHash).first();
+  if (!license || license.status !== "active" || !license.paid_confirmed || license.suspended_at) {
     const subject = await digest(`${env.CODE_HASH_PEPPER || ""}:${ip}:${productId}:${codeHash}`);
     const bucket = Math.floor(Date.now() / 900000);
     const attempt = await env.DB.prepare("INSERT INTO activation_attempts(subject_hash,bucket,failures) VALUES(?,?,1) ON CONFLICT(subject_hash,bucket) DO UPDATE SET failures=failures+1 RETURNING failures").bind(subject, bucket).first();
     if ((attempt?.failures || 1) > 5) return json({ error: "Trop d’essais pour ce code. Attendez 15 minutes avant de recommencer." }, 429);
-    return json({ error: "Code invalide, paiement non confirmé ou licence désactivée." }, 403);
+    return json({ error: "Code invalide, paiement non confirmé ou licence indisponible." }, 403);
   }
-  if (license.expires_at && new Date(license.expires_at).getTime() < Date.now()) return json({ error: "Cette licence a expiré." }, 403);
+  if (license.expires_at && Date.parse(license.expires_at) <= Date.now()) return json({ error: "Cette licence a expiré." }, 403);
   const installationHash = await digest(installationId);
   const prior = await env.DB.prepare("SELECT id FROM activations WHERE license_id=? AND installation_hash=?").bind(license.id, installationHash).first();
   if (!prior) {
@@ -82,44 +87,55 @@ async function activate(req, env) {
   } else {
     await env.DB.prepare("UPDATE activations SET last_seen=? WHERE license_id=? AND installation_hash=?").bind(new Date().toISOString(), license.id, installationHash).run();
   }
-  const token = await signedToken(env, { v: 1, app: productId, license: license.id, install: installationHash, iat: new Date().toISOString(), exp: license.expires_at || null });
-  return json({ ok: true, token, publicKey: await publicKey(env), offline: true });
+  const token = await signedToken(env, { v: 1, app: productId, kind: "license", license: license.id, install: installationHash, iat: new Date().toISOString(), exp: license.expires_at || null, cloud: license.cloud_enabled === 1 });
+  return json({ ok: true, token, publicKey: await publicKey(env), cloudEnabled: license.cloud_enabled === 1, expiresAt: license.expires_at, offline: true });
+}
+async function inspectLicense(env, productId, token, installationId) {
+  if (!validId(productId) || typeof token !== "string" || token.length > 4096 || typeof installationId !== "string" || installationId.length < 16 || installationId.length > 120) return { active: false, status: 400, error: "Informations de vérification invalides." };
+  const parts = token.split(".");
+  if (parts.length !== 2) return { active: false, status: 403, invalid: true, error: "Preuve de licence invalide." };
+  let claims;
+  try {
+    claims = JSON.parse(new TextDecoder().decode(from64u(parts[0])));
+    const key = await crypto.subtle.importKey("jwk", await publicKey(env), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, from64u(parts[1]), enc.encode(parts[0]))) throw new Error("signature");
+  } catch {
+    return { active: false, status: 403, invalid: true, error: "Preuve de licence invalide." };
+  }
+  const installationHash = await digest(installationId), now = Date.now();
+  if (claims.v !== 1 || claims.app !== productId || claims.install !== installationHash) return { active: false, status: 403, invalid: true, error: "Cette preuve ne correspond pas à cette installation." };
+  if (claims.kind === "trial") {
+    const trial = await env.DB.prepare("SELECT expires_at,cloud_enabled,cloud_tenant_id FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
+    if (!trial || Date.parse(trial.expires_at) <= now || (claims.exp && Date.parse(claims.exp) <= now)) return { active: false, status: 403, expired: true, error: "La période d’essai est terminée." };
+    return { active: true, kind: "trial", expiresAt: trial.expires_at, cloudEnabled: trial.cloud_enabled === 1, licenseId: trial.cloud_tenant_id, installHash: installationHash };
+  }
+  if (claims.kind !== "license" || typeof claims.license !== "string") return { active: false, status: 403, invalid: true, error: "Cette preuve ne correspond pas à une licence." };
+  const license = await env.DB.prepare("SELECT status,paid_confirmed,expires_at,cloud_enabled,suspended_at,cloud_daily_limit FROM licenses WHERE id=? AND product_id=?").bind(claims.license, productId).first();
+  if (!license || license.status !== "active" || !license.paid_confirmed || license.suspended_at) return { active: false, status: 403, revoked: true, error: "Cette licence est suspendue, révoquée ou indisponible." };
+  if ((license.expires_at && Date.parse(license.expires_at) <= now) || (claims.exp && Date.parse(claims.exp) <= now)) return { active: false, status: 403, expired: true, error: "Cette licence a expiré." };
+  const activation = await env.DB.prepare("SELECT id FROM activations WHERE license_id=? AND installation_hash=?").bind(claims.license, installationHash).first();
+  if (!activation) return { active: false, status: 403, invalid: true, error: "Cette installation n’est plus autorisée." };
+  return { active: true, kind: "license", expiresAt: license.expires_at, cloudEnabled: license.cloud_enabled === 1, licenseId: claims.license, installHash: installationHash, dailySyncLimit: license.cloud_daily_limit || 5000 };
 }
 async function checkStatus(req, env) {
-  const data = await body(req);
-  const productId = String(data.productId || "").trim().toUpperCase();
-  const token = String(data.token || "").trim();
-  const installationId = String(data.installationId || "").trim();
-  if (!validId(productId) || token.length > 4096 || installationId.length < 16 || installationId.length > 120) return json({ active: false, error: "Informations de vérification invalides." }, 400);
+  const data = await body(req), productId = String(data.productId || "").trim().toUpperCase();
   const beforeUsage = await dailyUsage(env);
   if (beforeUsage.totalRequests >= beforeUsage.softLimit) return json({ error: "Limite quotidienne du service atteinte.", usage: beforeUsage }, 429);
   await dailyUsage(env, true, "status");
-  const parts = token.split(".");
-  if (parts.length !== 2) return json({ active: false, invalid: true, error: "Preuve de licence invalide." }, 403);
-  let claims;
-  try {
-    const payloadText = new TextDecoder().decode(from64u(parts[0]));
-    claims = JSON.parse(payloadText);
-    const key = await crypto.subtle.importKey("jwk", await publicKey(env), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
-    const verified = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, from64u(parts[1]), enc.encode(parts[0]));
-    if (!verified) throw new Error("signature");
-  } catch {
-    return json({ active: false, invalid: true, error: "Preuve de licence invalide." }, 403);
-  }
-  const installationHash = await digest(installationId);
-  if (claims.v !== 1 || claims.app !== productId || claims.install !== installationHash) return json({ active: false, invalid: true, error: "Cette preuve ne correspond pas à cette installation." }, 403);
-  if (claims.kind === "trial") {
-    const trial = await env.DB.prepare("SELECT expires_at FROM trials WHERE product_id=? AND installation_hash=?").bind(productId, installationHash).first();
-    if (!trial || Date.parse(trial.expires_at) <= Date.now() || (claims.exp && Date.parse(claims.exp) <= Date.now())) return json({ active: false, expired: true, error: "La période d’essai est terminée." }, 403);
-    return json({ active: true, kind: "trial", expiresAt: trial.expires_at, checkedAt: new Date().toISOString() });
-  }
-  if (typeof claims.license !== "string") return json({ active: false, invalid: true, error: "Cette preuve de licence ne correspond pas." }, 403);
-  const license = await env.DB.prepare("SELECT status,paid_confirmed,expires_at FROM licenses WHERE id=? AND product_id=?").bind(claims.license, productId).first();
-  if (!license || license.status !== "active" || !license.paid_confirmed) return json({ active: false, revoked: true, error: "Cette licence a été révoquée ou désactivée." }, 403);
-  if ((license.expires_at && new Date(license.expires_at).getTime() < Date.now()) || (claims.exp && Date.parse(claims.exp) < Date.now())) return json({ active: false, expired: true, error: "Cette licence a expiré." }, 403);
-  const activation = await env.DB.prepare("SELECT id FROM activations WHERE license_id=? AND installation_hash=?").bind(claims.license, installationHash).first();
-  if (!activation) return json({ active: false, invalid: true, error: "Cette installation n’est plus autorisée." }, 403);
-  return json({ active: true, checkedAt: new Date().toISOString() });
+  const result = await inspectLicense(env, productId, String(data.token || "").trim(), String(data.installationId || "").trim());
+  if (!result.active) return json({ active: false, invalid: result.invalid, expired: result.expired, revoked: result.revoked, error: result.error }, result.status);
+  return json({ active: true, kind: result.kind, expiresAt: result.expiresAt, cloudEnabled: result.cloudEnabled, checkedAt: new Date().toISOString() });
+}
+async function issueCloudToken(req, env) {
+  const data = await body(req), productId = String(data.productId || "").trim().toUpperCase();
+  const beforeUsage = await dailyUsage(env);
+  if (beforeUsage.totalRequests >= beforeUsage.softLimit) return json({ error: "Limite quotidienne du service atteinte.", usage: beforeUsage }, 429);
+  await dailyUsage(env, true, "status");
+  const result = await inspectLicense(env, productId, String(data.token || "").trim(), String(data.installationId || "").trim());
+  if (!result.active) return json({ error: result.error, expired: result.expired, revoked: result.revoked }, result.status);
+  if (!result.cloudEnabled || !result.licenseId) return json({ error: "Cette licence ne comprend pas le service Cloud.", cloudEnabled: false }, 403);
+  const cloudToken = await signCloudToken(env.CLOUD_TOKEN_HMAC_SECRET, { scope: "lifeos:snapshot", productId, licenseId: result.licenseId, installHash: result.installHash, kind: result.kind, dailySyncLimit: result.dailySyncLimit || 5000 });
+  return json({ ok: true, cloudEnabled: true, cloudToken, expiresAt: new Date(Date.now() + 600000).toISOString(), licenseExpiresAt: result.expiresAt || null, checkedAt: new Date().toISOString() });
 }
 async function publicKey(env) {
   const jwk = JSON.parse(env.LICENSE_SIGNING_PRIVATE_JWK);
@@ -133,6 +149,7 @@ async function handle(req, env) {
   if (path === "/v1/activate" && req.method === "POST") return activate(req, env);
   if (path === "/v1/trial" && req.method === "POST") return startTrial(req, env);
   if (path === "/v1/status" && req.method === "POST") return checkStatus(req, env);
+  if (path === "/v1/cloud-token" && req.method === "POST") return issueCloudToken(req, env);
   if (!path.startsWith("/admin/")) return json({ error: "Route inconnue." }, 404);
   if (!(await auth(req, env))) return json({ error: "Accès administrateur refusé." }, 401);
   if (path === "/admin/usage" && req.method === "GET") return json(await dailyUsage(env));
