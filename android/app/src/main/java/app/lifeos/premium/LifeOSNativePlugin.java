@@ -9,6 +9,14 @@ import androidx.core.content.FileProvider;
 import com.getcapacitor.*;
 import com.getcapacitor.annotation.*;
 import java.io.*;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.util.Base64;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -18,6 +26,26 @@ public class LifeOSNativePlugin extends Plugin {
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private MainActivity host(){return (MainActivity)getActivity();}
     private boolean allowed(PluginCall c){if(!host().isAccessAllowed()){c.reject("LifeOS est verrouillé.");return false;}return true;}
+        private static final String CLOUD_TOKEN_PREF="cloud_token_v1",CLOUD_TOKEN_ALIAS="lifeos_cloud_token_v1";
+    private SecretKey cloudKey() throws Exception {
+        KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);
+        if(ks.containsAlias(CLOUD_TOKEN_ALIAS))return (SecretKey)ks.getKey(CLOUD_TOKEN_ALIAS,null);
+        KeyGenerator gen=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");
+        gen.init(new KeyGenParameterSpec.Builder(CLOUD_TOKEN_ALIAS,KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setRandomizedEncryptionRequired(true).build());
+        return gen.generateKey();
+    }
+    @PluginMethod public void storeCloudToken(PluginCall c){
+        if(!allowed(c))return;String token=c.getString("token");
+        if(token==null||token.length()<20||token.length()>4096){c.reject("Jeton Cloud invalide.");return;}
+        io.execute(()->{try{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,cloudKey());byte[] encrypted=cipher.doFinal(token.getBytes(StandardCharsets.UTF_8));byte[] iv=cipher.getIV();byte[] packed=new byte[iv.length+encrypted.length];System.arraycopy(iv,0,packed,0,iv.length);System.arraycopy(encrypted,0,packed,iv.length,encrypted.length);getContext().getSharedPreferences("lifeos.secure",android.content.Context.MODE_PRIVATE).edit().putString(CLOUD_TOKEN_PREF,Base64.encodeToString(packed,Base64.NO_WRAP)).apply();c.resolve();}catch(Exception e){c.reject("Stockage sécurisé du jeton impossible.");}});
+    }
+    @PluginMethod public void getCloudToken(PluginCall c){
+        if(!allowed(c))return;
+        io.execute(()->{try{String stored=getContext().getSharedPreferences("lifeos.secure",android.content.Context.MODE_PRIVATE).getString(CLOUD_TOKEN_PREF,null);JSObject result=new JSObject();if(stored==null){result.put("token","");c.resolve(result);return;}byte[] packed=Base64.decode(stored,Base64.NO_WRAP);if(packed.length<29)throw new IllegalArgumentException();byte[] iv=java.util.Arrays.copyOfRange(packed,0,12),encrypted=java.util.Arrays.copyOfRange(packed,12,packed.length);Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,cloudKey(),new GCMParameterSpec(128,iv));result.put("token",new String(cipher.doFinal(encrypted),StandardCharsets.UTF_8));c.resolve(result);}catch(Exception e){getContext().getSharedPreferences("lifeos.secure",android.content.Context.MODE_PRIVATE).edit().remove(CLOUD_TOKEN_PREF).apply();c.reject("Jeton Cloud illisible; il sera renouvelé après vérification de la licence.");}});
+    }
+    @PluginMethod public void clearCloudToken(PluginCall c){
+        if(!allowed(c))return;getContext().getSharedPreferences("lifeos.secure",android.content.Context.MODE_PRIVATE).edit().remove(CLOUD_TOKEN_PREF).apply();c.resolve();
+    }
     @PluginMethod public void status(PluginCall c){JSObject r=new JSObject();r.put("lockEnabled",BackupStore.prefs(getContext()).getBoolean("lock",false));r.put("canAuthenticate",BiometricManager.from(getContext()).canAuthenticate(MainActivity.AUTH)==BiometricManager.BIOMETRIC_SUCCESS);c.resolve(r);}
     @PluginMethod public void setLock(PluginCall c){if(!allowed(c))return;boolean enabled=Boolean.TRUE.equals(c.getBoolean("enabled"));getActivity().runOnUiThread(()->host().authenticate(()->{BackupStore.prefs(getContext()).edit().putBoolean("lock",enabled).apply();c.resolve();},c::reject));}
     @PluginMethod public void lockNow(PluginCall c){if(!allowed(c))return;if(!host().lockEnabled()){c.reject("Active d’abord le verrouillage.");return;}getActivity().runOnUiThread(()->{host().lockNow();c.resolve();});}

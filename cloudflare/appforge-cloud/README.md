@@ -1,20 +1,15 @@
-# LifeOS AppForge Cloud
+# AppForge Cloud pour LifeOS
 
-Service Workers + D1 offline-first adapté du kit AppForge Cloud de la Bibliothèque. La base Cloud est séparée de celle des licences. Le snapshot LifeOS est synchronisé après sauvegarde locale; un conflit de révision n’écrase jamais le serveur automatiquement.
+Le parcours LifeOS V3 est désormais **sans compte client** : une licence active et éligible autorise le Worker de licences à émettre un jeton Cloud court (10 minutes), lié à l’appareil. Le Worker Cloud vérifie à chaque lecture/écriture l’état courant de la licence et l’activation de l’appareil, puis isole le snapshot dans D1 par identifiant de licence.
 
-## Déploiement
+## Worker canonique
 
-Prérequis : compte Cloudflare, Node.js, Wrangler et une base D1 dédiée. Aucune URL de Worker ou secret Cloudflare n’était disponible dans la Bibliothèque; ce service n’est donc pas déclaré déployé.
+Le Worker à déployer pour LifeOS est [appforge-cloud-sync](../appforge-cloud-sync/README.md). Ce dossier historique contient les anciennes routes comptes / organisations. Elles restent présentes et leurs tables/migrations ne sont pas supprimées afin de préserver les données; le client LifeOS ne les appelle plus. Ne pas les présenter comme le parcours V3.
 
-1. Créer D1 avec `npx wrangler d1 create lifeos-cloud`, puis remplacer l’ID placeholder dans `worker/wrangler.toml`.
-2. Renseigner les origines HTTPS exactes dans `APP_ORIGINS`. Pour l’APK Capacitor, confirmer l’origine réelle du WebView avant de l’ajouter (souvent `https://localhost`). Le HTML ouvert en `file://` ne peut pas appeler le Worker.
-3. Depuis `worker`, exécuter `npm install`, puis `npx wrangler d1 migrations apply lifeos-cloud --remote`.
-4. Configurer `BOOTSTRAP_SECRET` par `npx wrangler secret put BOOTSTRAP_SECRET`, avec au moins 32 caractères générés localement, puis `npx wrangler deploy`.
-5. Créer une seule fois l’organisation propriétaire via `POST /v1/bootstrap` avec l’en-tête `X-Bootstrap-Secret`. Retirer aussitôt le secret (`npx wrangler secret delete BOOTSTRAP_SECRET`). Ne pas enregistrer les secrets dans Git.
-6. Vérifier `GET /health`, le login, l’organisation et un aller-retour snapshot sur deux appareils avant de valider le cloud.
+## Sources de règles
 
-Les comptes secondaires nécessitent une invitation par un owner/admin. Les invitations et codes de réinitialisation sont remis manuellement (pas d’e-mail sortant intégré). D1 stocke le snapshot JSON (limite 500 Ko), sans chiffrement de bout en bout. Quota configurable : 5 000 requêtes snapshot/utilisateur/jour par défaut.
+- [Standard AppForge V3](https://github.com/RMLala/android-template/blob/main/APPFORGE-STANDARD-V3.md)
+- [PR de référence no 7](https://github.com/RMLala/android-template/pull/7)
+- [Guide de déploiement Cloud et licences](../appforge-cloud-sync/README.md)
 
-## Routes et sécurité
-
-Voir `worker/src/index.js` : bootstrap one-shot, login mot de passe PBKDF2, sessions révocables de 30 jours, rôles organisationnels, invitations, quota, snapshots avec révision optimiste et réponse 409. Le client conserve le token en mémoire de session seulement. Les données locales restent la source disponible hors ligne.
+Les anciens snapshots par organisation ne sont pas automatiquement migrés vers les nouvelles lignes tenant par licence : une migration de données nécessite une décision et une association explicite à une licence. Aucun ancien compte, snapshot ou table n’est supprimé par ces changements.

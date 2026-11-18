@@ -1,3 +1,4 @@
+import { verifyCloudToken } from "../../../shared/cloud-token.js";
 const enc = new TextEncoder();
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers } });
 const b64u = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
@@ -24,7 +25,61 @@ async function loginSuccess(env,key){await env.DB.prepare("DELETE FROM auth_atte
 async function consumeSyncQuota(env,userSub){const day=new Date().toISOString().slice(0,10),configured=Number.parseInt(env.DAILY_SYNC_LIMIT||"5000",10),limit=Number.isInteger(configured)?Math.max(1,Math.min(configured,100000)):5000;const row=await env.DB.prepare("INSERT INTO api_usage(user_sub,day,requests,updated_at) VALUES(?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(user_sub,day) DO UPDATE SET requests=api_usage.requests+1,updated_at=CURRENT_TIMESTAMP WHERE api_usage.requests < ? RETURNING requests").bind(userSub,day,limit).first();if(row)return {allowed:true,day,requests:row.requests,limit,alert:row.requests>=Math.ceil(limit*.75)};const current=await env.DB.prepare("SELECT requests FROM api_usage WHERE user_sub=? AND day=?").bind(userSub,day).first();return {allowed:false,day,requests:current?.requests||limit,limit,alert:true}}
 async function createOrg(env,userSub,name){const id=crypto.randomUUID();await env.DB.batch([env.DB.prepare("INSERT INTO organizations(id,name,created_by,created_at) VALUES(?,?,?,CURRENT_TIMESTAMP)").bind(id,name,userSub),env.DB.prepare("INSERT INTO memberships(org_id,user_sub,role,status,created_at) VALUES(?,?,'owner','active',CURRENT_TIMESTAMP)").bind(id,userSub)]);return id}
 async function acceptInvite(env,invite,userSub){await env.DB.batch([env.DB.prepare("INSERT INTO memberships(org_id,user_sub,role,status,created_at) VALUES(?,?,?,'active',CURRENT_TIMESTAMP) ON CONFLICT(org_id,user_sub) DO UPDATE SET role=excluded.role,status='active'").bind(invite.org_id,userSub,invite.role),env.DB.prepare("UPDATE invitations SET accepted_at=CURRENT_TIMESTAMP,accepted_by=? WHERE id=? AND accepted_at IS NULL").bind(userSub,invite.id)])}
-async function handle(req,env){const url=new URL(req.url),path=url.pathname,method=req.method;if(method==="OPTIONS")return new Response(null,{status:204,headers:cors(req,env)});if(path==="/health"&&method==="GET")return response(req,env,{ok:true,service:"AppForge Cloud",authentication:"email-password",database:"D1",sync:"offline-first"});
+async function licenseBoundIdentity(req, env) {
+  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  let claims;
+  try { claims = await verifyCloudToken(env.CLOUD_TOKEN_HMAC_SECRET, token, { productId: "LIFEOS-V1" }); }
+  catch { return { error: "Jeton Cloud invalide ou expiré.", status: 401 }; }
+  if (claims.kind === "trial") {
+    const trial = await env.LICENSES.prepare("SELECT expires_at,cloud_enabled,cloud_tenant_id FROM trials WHERE product_id=? AND installation_hash=?").bind("LIFEOS-V1", claims.installHash).first();
+    if (!trial || trial.cloud_enabled !== 1 || trial.cloud_tenant_id !== claims.licenseId || Date.parse(trial.expires_at) <= Date.now()) return { error: "Droit Cloud expiré ou révoqué.", status: 403 };
+    return { claims, limit: Math.max(1, Number(env.TRIAL_DAILY_SYNC_LIMIT || 500)), licenseId: trial.cloud_tenant_id };
+  }
+  if (claims.kind !== "license") return { error: "Jeton Cloud hors périmètre.", status: 401 };
+  const license = await env.LICENSES.prepare("SELECT status,paid_confirmed,expires_at,cloud_enabled,suspended_at,cloud_daily_limit FROM licenses WHERE id=? AND product_id=?").bind(claims.licenseId, "LIFEOS-V1").first();
+  if (!license || license.status !== "active" || license.paid_confirmed !== 1 || license.suspended_at || license.cloud_enabled !== 1 || (license.expires_at && Date.parse(license.expires_at) <= Date.now())) return { error: "Droit Cloud expiré, suspendu ou révoqué.", status: 403 };
+  const device = await env.LICENSES.prepare("SELECT id FROM activations WHERE license_id=? AND installation_hash=?").bind(claims.licenseId, claims.installHash).first();
+  if (!device) return { error: "Cet appareil n’est plus autorisé.", status: 403 };
+  return { claims, limit: Math.max(1, Number(license.cloud_daily_limit || env.DAILY_SYNC_LIMIT || 5000)), licenseId: claims.licenseId };
+}
+async function consumeLicenseQuota(env, licenseId, limit) {
+  const day = new Date().toISOString().slice(0,10);
+  const row = await env.DB.prepare("INSERT INTO license_sync_usage(license_id,day,requests,updated_at) VALUES(?,?,1,CURRENT_TIMESTAMP) ON CONFLICT(license_id,day) DO UPDATE SET requests=license_sync_usage.requests+1,updated_at=CURRENT_TIMESTAMP WHERE license_sync_usage.requests < ? RETURNING requests").bind(licenseId,day,limit).first();
+  if (row) return { allowed:true, day, requests:row.requests, limit };
+  const current = await env.DB.prepare("SELECT requests FROM license_sync_usage WHERE license_id=? AND day=?").bind(licenseId,day).first();
+  return { allowed:false, day, requests:current?.requests||limit, limit };
+}
+async function licenseSnapshot(req, env) {
+  const pathname = new URL(req.url).pathname, method = req.method;
+  if (method === "OPTIONS") return new Response(null,{status:204,headers:cors(req,env)});
+  if (pathname !== "/v1/lifeos/snapshot" || !["GET","PUT"].includes(method)) return response(req,env,{error:"Route introuvable."},404);
+  if (!env.LICENSES || !env.DB) return response(req,env,{error:"Service Cloud incompletement configuré."},503);
+  const identity = await licenseBoundIdentity(req,env);
+  if (identity.error) return response(req,env,{error:identity.error},identity.status);
+  const quota = await consumeLicenseQuota(env,identity.licenseId,identity.limit);
+  if (!quota.allowed) return response(req,env,{error:"Quota Cloud quotidien atteint. Les données locales restent disponibles.",...quota},429);
+  if (method === "GET") {
+    const row=await env.DB.prepare("SELECT revision,payload,updated_by_install AS updatedByInstall,updated_at AS updatedAt FROM license_snapshots WHERE license_id=? AND product_id=?").bind(identity.licenseId,"LIFEOS-V1").first();
+    return response(req,env,row?{revision:row.revision,snapshot:JSON.parse(row.payload),updatedAt:row.updatedAt,updatedByInstall:row.updatedByInstall,usage:quota}:{revision:0,snapshot:null,updatedAt:null,usage:quota});
+  }
+  const d=await body(req,520000),expected=Number(d.expectedRevision),snapshot=d.snapshot;
+  if(!Number.isSafeInteger(expected)||expected<0||!snapshot||typeof snapshot!=="object"||Array.isArray(snapshot))return response(req,env,{error:"Révision ou sauvegarde invalide."},400);
+  const payload=JSON.stringify(snapshot);
+  if(payload.length>500000)return response(req,env,{error:"Sauvegarde supérieure à 500 Ko."},413);
+  const current=await env.DB.prepare("SELECT revision FROM license_snapshots WHERE license_id=? AND product_id=?").bind(identity.licenseId,"LIFEOS-V1").first();
+  const revision=current?.revision||0,next=revision+1;
+  if(revision!==expected)return response(req,env,{error:"Conflit de synchronisation : relisez la version Cloud. La copie locale est conservée.",revision},409);
+  if(current){
+    const changed=await env.DB.prepare("UPDATE license_snapshots SET payload=?,revision=?,updated_by_install=?,updated_at=CURRENT_TIMESTAMP WHERE license_id=? AND product_id=? AND revision=?").bind(payload,next,identity.claims.installHash,identity.licenseId,"LIFEOS-V1",revision).run();
+    if(changed.meta?.changes!==1)return response(req,env,{error:"Conflit de synchronisation : une version plus récente existe.",revision},409);
+  }else{
+    try{await env.DB.prepare("INSERT INTO license_snapshots(license_id,product_id,payload,revision,updated_by_install,updated_at) VALUES(?,?,?,1,?,CURRENT_TIMESTAMP)").bind(identity.licenseId,"LIFEOS-V1",payload,identity.claims.installHash).run();}
+    catch{return response(req,env,{error:"Conflit de création de la première copie Cloud."},409);}
+  }
+  return response(req,env,{ok:true,revision:next,updatedAt:new Date().toISOString(),usage:quota});
+}
+
+async function handle(req,env){const routePath=new URL(req.url).pathname;if(routePath==='/v1/lifeos/snapshot')return licenseSnapshot(req,env);const url=new URL(req.url),path=url.pathname,method=req.method;if(method==="OPTIONS")return new Response(null,{status:204,headers:cors(req,env)});if(path==="/health"&&method==="GET")return response(req,env,{ok:true,service:"AppForge Cloud",authentication:"license-token",database:"D1",sync:"offline-first"});
  if(path==="/v1/bootstrap"&&method==="POST"){const d=await body(req,20000),secret=req.headers.get("X-Bootstrap-Secret")||"";if(!env.BOOTSTRAP_SECRET||!constantTime(secret,env.BOOTSTRAP_SECRET))return response(req,env,{error:"Initialisation refusée."},401);const existing=await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first();if(existing?.n)return response(req,env,{error:"Le compte initial existe déjà. Retirez le secret BOOTSTRAP_SECRET de Cloudflare."},409);const email=String(d.email||"").trim().toLowerCase(),name=String(d.name||"").trim(),orgName=String(d.organization||"").trim();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!safeText(name,120)||!safeText(orgName,100)||!validPassword(d.password))return response(req,env,{error:"Nom, organisation, e-mail ou mot de passe invalide (12 caractères minimum)."},400);const userSub=crypto.randomUUID(),{salt,hash:pw}=await makePassword(d.password);await env.DB.prepare("INSERT INTO users(user_sub,email,name,password_salt,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(userSub,email,name,salt,pw).run();const orgId=await createOrg(env,userSub,orgName),session=await issueSession(env,userSub);return response(req,env,{token:session,user:{email,name},organizations:await organizations(env,userSub),createdOrganization:orgId},201)}
  if(path==="/v1/auth/register"&&method==="POST"){const d=await body(req,20000),token=String(d.inviteToken||""),email=String(d.email||"").trim().toLowerCase(),name=String(d.name||"").trim();if(token.length<30||!validPassword(d.password)||!safeText(name,120)||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return response(req,env,{error:"Invitation, adresse, nom ou mot de passe invalide."},400);const inv=await env.DB.prepare("SELECT id,org_id,email,role,expires_at FROM invitations WHERE token_hash=? AND accepted_at IS NULL").bind(await hash(token)).first();if(!inv||Date.parse(inv.expires_at)<=Date.now()||inv.email!==email)return response(req,env,{error:"Invitation expirée, utilisée ou adresse incorrecte."},403);const existing=await env.DB.prepare("SELECT user_sub FROM users WHERE email=?").bind(email).first();if(existing)return response(req,env,{error:"Un compte existe déjà. Connectez-vous puis acceptez l’invitation."},409);const sub=crypto.randomUUID(),pw=await makePassword(d.password);await env.DB.prepare("INSERT INTO users(user_sub,email,name,password_salt,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").bind(sub,email,name,pw.salt,pw.hash).run();await acceptInvite(env,inv,sub);const session=await issueSession(env,sub);return response(req,env,{token:session,user:{email,name},organizations:await organizations(env,sub)},201)}
  if(path==="/v1/auth/login"&&method==="POST"){const d=await body(req,12000),email=String(d.email||"").trim().toLowerCase(),password=String(d.password||"");if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length>128)return response(req,env,{error:"Identifiants invalides."},400);const key=await loginAllowed(env,req,email);if(!key)return response(req,env,{error:"Trop de tentatives. Réessayez dans 15 minutes."},429);const u=await env.DB.prepare("SELECT user_sub,email,name,password_salt,password_hash FROM users WHERE email=?").bind(email).first();const candidate=u&&validPassword(password)?await derivePassword(password,u.password_salt):"";if(!u||!constantTime(candidate,u.password_hash)){await loginFailure(env,key);return response(req,env,{error:"Adresse ou mot de passe incorrect."},401)}await loginSuccess(env,key);const token=await issueSession(env,u.user_sub);return response(req,env,{token,user:{email:u.email,name:u.name},organizations:await organizations(env,u.user_sub)},200)}

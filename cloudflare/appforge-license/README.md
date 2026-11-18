@@ -1,16 +1,15 @@
-# LifeOS licences AppForge
+# LifeOS — licences AppForge V3
 
-Worker de licences issu du kit AppForge Cloudflare de la Bibliothèque, adapté avec le produit `LIFEOS-V1`. La migration 0005 ajoute LifeOS sans altérer les produits historiques du kit.
+Le Worker valide la licence, le paiement confirmé, la date d’expiration et l’installation autorisée. La route `POST /v1/cloud-token` renouvelle une autorisation Cloud de dix minutes seulement quand `cloud_enabled=1`; un compte AppForge Cloud n’est pas requis.
 
 ## Déploiement
 
-Aucun endpoint Worker ni secret de production n’a été trouvé dans la Bibliothèque. Le worker n’est pas déployé par cette PR.
+Cette PR prépare le Worker et les migrations. Elle ne déploie pas de Worker/D1 et ne certifie pas MVola en production. Il faut des droits Cloudflare du propriétaire du service.
 
-1. Créer une base dédiée : `npx wrangler d1 create lifeos-licenses`; remplacer l’ID placeholder dans `worker/wrangler.toml`.
-2. Configurer `APP_ORIGINS` avec les origines HTTPS exactes. Laisser vide jusqu’à validation de l’origine du WebView.
-3. Dans `worker`, exécuter `npm install`, puis `npx wrangler d1 migrations apply lifeos-licenses --remote`.
-4. Générer la clé P-256 : `node scripts/generate-signing-key.mjs`. Garder le JWK privé hors dépôt. Ajouter dans Wrangler les secrets `LICENSE_SIGNING_PRIVATE_JWK`, `ADMIN_API_TOKEN` et `CODE_HASH_PEPPER`.
-5. Déployer, contrôler `/health` et `/v1/config`, puis créer les licences via routes `/admin/*`. L’essai est serveur 72 h, mensuel 30 jours, annuel 365 jours, à vie, propriétaire, et test interne 1 jour.
-6. Paiement MVola confirmé manuellement avant l’émission d’un code client. La preuve signée locale permet l’usage hors ligne; la révocation est appliquée à la prochaine vérification en ligne.
+1. Créer D1 `lifeos-licenses`; renseigner l’ID dans `worker/wrangler.toml`.
+2. Appliquer les migrations jusqu’à `0006_cloud_entitlements.sql`. C’est une migration additive : elle ne supprime ni les licences ni les activations.
+3. Garder les secrets Worker uniquement dans Wrangler : `LICENSE_SIGNING_PRIVATE_JWK`, `ADMIN_API_TOKEN`, `CODE_HASH_PEPPER` et `CLOUD_TOKEN_HMAC_SECRET`. La dernière valeur doit être identique sur le Worker Cloud LifeOS. Ne pas mettre cette valeur dans l’APK, le HTML, le fichier de configuration ou Git.
+4. Déployer ce Worker et vérifier `GET /health`, `GET /v1/config`, activation après paiement confirmé, statut, renouvellement de jeton et refus après expiration/révocation/appareil retiré.
+5. Déployer ensuite [le Worker Cloud V3](../appforge-cloud-sync/README.md) avec une liaison `LICENSES` vers ce même D1.
 
-Ne jamais placer les clés privées, le token admin, pepper ou une clé de signature dans le HTML, l’APK ou Git. L’URL seule ne prouve pas le déploiement. Le build LifeOS montre « non configuré » tant qu’une URL réelle n’est pas ajoutée dans l’app.
+L’activation MVola reste fondée sur la validation de paiement existante côté administration : le Worker refuse une licence si `paid_confirmed` n’est pas vrai. La vérification d’une réponse d’API ne remplace pas un test sur une licence et un appareil réels.
