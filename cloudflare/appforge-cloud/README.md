@@ -4,7 +4,7 @@ Le parcours LifeOS V3 est désormais **sans compte client** : une licence active
 
 ## Worker canonique
 
-Le Worker à déployer pour LifeOS est [appforge-cloud-sync/worker](../appforge-cloud-sync/worker/README.md). Ce dossier historique contient les anciennes routes comptes / organisations. Elles restent présentes et leurs tables/migrations ne sont pas supprimées afin de préserver les données; le client LifeOS ne les appelle plus. Ne pas les présenter comme le parcours V3.
+Le Worker à déployer pour LifeOS est [appforge-cloud-sync](../appforge-cloud-sync/README.md). Ce dossier historique contient les anciennes routes comptes / organisations. Elles restent présentes et leurs tables/migrations ne sont pas supprimées afin de préserver les données; le client LifeOS ne les appelle plus. Ne pas les présenter comme le parcours V3.
 
 ## Sources de règles
 
