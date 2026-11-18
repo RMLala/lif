@@ -4,7 +4,7 @@ import { parse } from 'acorn';
 fs.mkdirSync('www', { recursive: true });
 fs.mkdirSync('dist', { recursive: true });
 const read = path => fs.readFileSync('src/' + path, 'utf8');
-const extra = ['features.js', 'model-v6.js', 'screens-v6.js', 'planning-v6.js', 'focus-v6.js', 'enhancements-v6.js', 'cloud-v3.js'].map(read).join('\n');
+const extra = ['features.js', 'model-v6.js', 'screens-v6.js', 'planning-v6.js', 'focus-v6.js', 'enhancements-v6.js', 'cloud-v3.js', 'habits-compact-v3.js'].map(read).join('\n');
 const app = read('app.js').replace('/*BOOT*/', extra + '\ninit();\nbootV6();');
 parse(app, { ecmaVersion: 'latest' });
 
