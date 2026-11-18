@@ -184,7 +184,7 @@ async function handle(req, env) {
     const durationDays = { test_day: 1, monthly: 30, annual: 365 }[plan];
     const expiresAt = durationDays ? new Date(Date.now() + durationDays * 86400000).toISOString() : null;
     const dbPlan = ["lifetime","owner"].includes(plan) ? "lifetime" : "annual";
-    await env.DB.prepare("INSERT INTO licenses(id,product_id,customer_name,customer_email,code_hash,status,paid_confirmed,plan,max_devices,expires_at,payment_reference,created_at,license_type) VALUES(?,?,?,?,?,'active',1,?,?,?,?,?,?)").bind(id, productId, customerName, String(d.customerEmail || "").slice(0,160), codeHash, dbPlan, maxDevices, expiresAt, paymentReference.slice(0,100), now, plan).run();
+    await env.DB.prepare("INSERT INTO licenses(id,product_id,customer_name,customer_email,code_hash,status,paid_confirmed,plan,max_devices,expires_at,payment_reference,created_at,license_type,cloud_enabled) VALUES(?,?,?,?,?,'active',1,?,?,?,?,?,?,1)").bind(id, productId, customerName, String(d.customerEmail || "").slice(0,160), codeHash, dbPlan, maxDevices, expiresAt, paymentReference.slice(0,100), now, plan).run();
     return json({ ok: true, id, productId, customerName, code, plan, maxDevices, expiresAt, createdAt: now }, 201);
   }
   const revoke = path.match(/^\/admin\/licenses\/([0-9a-f-]{36})\/revoke$/i);
