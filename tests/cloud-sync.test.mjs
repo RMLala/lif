@@ -67,3 +67,12 @@ test('per-license quota blocks requests without mutating snapshots',async()=>{
  assert.equal((await call(env,'GET',token)).response.status,200);
  assert.equal((await call(env,'GET',token)).response.status,429);
 });
+
+test('LifeOS no longer asks users for AppForge Cloud accounts or endpoints',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const source=await readFile(new URL('../src/cloud-v3.js',import.meta.url),'utf8');
+ for(const obsolete of ['afCloudEmail','afCloudPassword','afOrg','afCloudUrl','afLicenseUrl','afLogin','afSession'])assert.equal(source.includes(obsolete),false,obsolete+' must be absent');
+ assert.match(source,/\/v1\/cloud-token/);
+ assert.match(source,/storeCloudToken/);
+ assert.equal(source.includes('CLOUD_TOKEN_HMAC_SECRET'),false);
+});
