@@ -109,7 +109,7 @@ async function inspectLicense(env, productId, token, installationId) {
     if (!trial || Date.parse(trial.expires_at) <= now || (claims.exp && Date.parse(claims.exp) <= now)) return { active: false, status: 403, expired: true, error: "La période d’essai est terminée." };
     return { active: true, kind: "trial", expiresAt: trial.expires_at, cloudEnabled: trial.cloud_enabled === 1, licenseId: trial.cloud_tenant_id, installHash: installationHash };
   }
-  if (claims.kind !== "license" || typeof claims.license !== "string") return { active: false, status: 403, invalid: true, error: "Cette preuve ne correspond pas à une licence." };
+  if ((claims.kind !== "license" && claims.kind !== undefined) || typeof claims.license !== "string") return { active: false, status: 403, invalid: true, error: "Cette preuve ne correspond pas à une licence." };
   const license = await env.DB.prepare("SELECT status,paid_confirmed,expires_at,cloud_enabled,suspended_at,cloud_daily_limit FROM licenses WHERE id=? AND product_id=?").bind(claims.license, productId).first();
   if (!license || license.status !== "active" || !license.paid_confirmed || license.suspended_at) return { active: false, status: 403, revoked: true, error: "Cette licence est suspendue, révoquée ou indisponible." };
   if ((license.expires_at && Date.parse(license.expires_at) <= now) || (claims.exp && Date.parse(claims.exp) <= now)) return { active: false, status: 403, expired: true, error: "Cette licence a expiré." };
