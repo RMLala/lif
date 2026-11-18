@@ -15,8 +15,8 @@ function mockEnv({revoked=[],devices=[installA,installB],limit=100}={}) {
   const snapshots=new Map(),usage=new Map();
   const DB={prepare(sql){return{bind(...a){return{
     first:async()=>{
-      if(sql.includes('FROM license_sync_usage WHERE'))return usage.get(a[0]+':'+a[1])||null;
       if(sql.includes('INSERT INTO license_sync_usage')){const key=a[0]+':'+a[1],current=usage.get(key)?.requests||0,cap=a[2];if(current>=cap)return null;const row={requests:current+1};usage.set(key,row);return row}
+      if(sql.includes('FROM license_sync_usage WHERE'))return usage.get(a[0]+':'+a[1])||null;
       if(sql.includes('FROM license_snapshots WHERE')){const v=snapshots.get(a[0]+':'+a[1]);return v?{revision:v.revision,payload:JSON.stringify(v.snapshot),updatedAt:'2026-01-01T00:00:00.000Z',updatedByInstall:v.installHash}:null}
       return null
     },
@@ -25,12 +25,13 @@ function mockEnv({revoked=[],devices=[installA,installB],limit=100}={}) {
       if(sql.startsWith('INSERT INTO license_snapshots')){const key=a[0]+':'+a[1];if(snapshots.has(key))throw Error('unique');snapshots.set(key,{revision:1,snapshot:JSON.parse(a[2]),installHash:a[3]});return{meta:{changes:1}}}
       return{meta:{changes:1}}
     }
-  }}}},LICENSES:{prepare(sql){return{bind(...a){return{first:async()=>{
+  }}}}};
+  const LICENSES={prepare(sql){return{bind(...a){return{first:async()=>{
     if(sql.includes('FROM licenses WHERE'))return licenses.get(a[0])||null;
     if(sql.includes('FROM activations WHERE'))return activations.has(a[0]+':'+a[1])?{id:1}:null;
-    return null;
-  }}}}}},CLOUD_TOKEN_HMAC_SECRET:SECRET,APP_ORIGINS:'https://localhost'};
-  return{env:DB,snapshots};
+    return null
+  }}}}}};
+  return{env:{DB,LICENSES,CLOUD_TOKEN_HMAC_SECRET:SECRET,APP_ORIGINS:'https://localhost'},snapshots};
 }
 async function bearer(licenseId=id1,installHash=installA,kind='license',time=Date.now()){
  return signCloudToken(SECRET,{scope:'lifeos:snapshot',productId:'LIFEOS-V1',licenseId,installHash,kind},time);
