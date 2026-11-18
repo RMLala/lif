@@ -26,7 +26,7 @@ async function consumeSyncQuota(env,userSub){const day=new Date().toISOString().
 async function createOrg(env,userSub,name){const id=crypto.randomUUID();await env.DB.batch([env.DB.prepare("INSERT INTO organizations(id,name,created_by,created_at) VALUES(?,?,?,CURRENT_TIMESTAMP)").bind(id,name,userSub),env.DB.prepare("INSERT INTO memberships(org_id,user_sub,role,status,created_at) VALUES(?,?,'owner','active',CURRENT_TIMESTAMP)").bind(id,userSub)]);return id}
 async function acceptInvite(env,invite,userSub){await env.DB.batch([env.DB.prepare("INSERT INTO memberships(org_id,user_sub,role,status,created_at) VALUES(?,?,?,'active',CURRENT_TIMESTAMP) ON CONFLICT(org_id,user_sub) DO UPDATE SET role=excluded.role,status='active'").bind(invite.org_id,userSub,invite.role),env.DB.prepare("UPDATE invitations SET accepted_at=CURRENT_TIMESTAMP,accepted_by=? WHERE id=? AND accepted_at IS NULL").bind(userSub,invite.id)])}
 async function licenseBoundIdentity(req, env) {
-  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   let claims;
   try { claims = await verifyCloudToken(env.CLOUD_TOKEN_HMAC_SECRET, token, { productId: "LIFEOS-V1" }); }
   catch { return { error: "Jeton Cloud invalide ou expiré.", status: 401 }; }
@@ -50,7 +50,7 @@ async function consumeLicenseQuota(env, licenseId, limit) {
   return { allowed:false, day, requests:current?.requests||limit, limit };
 }
 async function licenseSnapshot(req, env) {
-  const { pathname, method } = new URL(req.url);
+  const pathname = new URL(req.url).pathname, method = req.method;
   if (method === "OPTIONS") return new Response(null,{status:204,headers:cors(req,env)});
   if (pathname !== "/v1/lifeos/snapshot" || !["GET","PUT"].includes(method)) return response(req,env,{error:"Route introuvable."},404);
   if (!env.LICENSES || !env.DB) return response(req,env,{error:"Service Cloud incompletement configuré."},503);
