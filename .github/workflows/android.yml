@@ -2,9 +2,9 @@ name: Android Debug and signed Release API23/API29
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/appforge-v3-api23-api29-no-pwa]
   push:
-    branches: [main]
+    branches: [main, codex/lifeos-license-bound-cloud-v3]
   workflow_dispatch:
 
 permissions:
