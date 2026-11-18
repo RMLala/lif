@@ -76,3 +76,11 @@ test('LifeOS no longer asks users for AppForge Cloud accounts or endpoints',asyn
  assert.match(source,/storeCloudToken/);
  assert.equal(source.includes('CLOUD_TOKEN_HMAC_SECRET'),false);
 });
+
+test('every newly issued active paid license receives Cloud entitlement',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const worker=await readFile(new URL('../cloudflare/appforge-license/worker/src/index.js',import.meta.url),'utf8');
+ const migration=await readFile(new URL('../cloudflare/appforge-license/worker/migrations/0006_cloud_entitlements.sql',import.meta.url),'utf8');
+ assert.match(worker,/license_type,cloud_enabled\) VALUES\([^\n]*,1\)/);
+ assert.match(migration,/UPDATE licenses SET cloud_enabled=1 WHERE status='active' AND paid_confirmed=1/);
+});
